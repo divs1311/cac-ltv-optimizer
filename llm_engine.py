@@ -192,9 +192,52 @@ async def get_ai_recommendations(
     try:
         data = json.loads(candidate)
     except json.JSONDecodeError as e:
-        # Provide a helpful error including a snippet of the raw response
-        snippet = raw[:1000] + ("..." if len(raw) > 1000 else "")
-        raise ValueError(f"Failed to parse model JSON output: {e}\nResponse snippet: {snippet}") from e
+        # Attempt to repair common JSON issues (unescaped newlines inside
+        # strings, trailing commas, unclosed final quote) and retry.
+        def _repair_json_text(s: str) -> str:
+            s = s.replace('\r\n', '\n')
+
+            out_chars = []
+            in_str = False
+            esc = False
+            for ch in s:
+                if in_str:
+                    if esc:
+                        out_chars.append(ch)
+                        esc = False
+                    elif ch == '\\':
+                        out_chars.append(ch)
+                        esc = True
+                    elif ch == '"':
+                        out_chars.append(ch)
+                        in_str = False
+                    elif ch == '\n' or ch == '\r':
+                        out_chars.append('\\n')
+                    else:
+                        out_chars.append(ch)
+                else:
+                    if ch == '"':
+                        out_chars.append(ch)
+                        in_str = True
+                    else:
+                        out_chars.append(ch)
+
+            repaired = ''.join(out_chars)
+            if in_str:
+                repaired = repaired + '"'
+
+            # Remove trailing commas before closing array/object
+            repaired = re.sub(r',\s*(?=[}\]])', '', repaired)
+            return repaired
+
+        repaired_candidate = _repair_json_text(candidate)
+        try:
+            data = json.loads(repaired_candidate)
+        except json.JSONDecodeError:
+            snippet = raw[:2000] + ("..." if len(raw) > 2000 else "")
+            raise ValueError(
+                f"Failed to parse model JSON output after repair attempts: {e}\nResponse snippet: {snippet}"
+            ) from e
 
     return data
 
