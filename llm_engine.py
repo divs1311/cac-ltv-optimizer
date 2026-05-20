@@ -5,10 +5,12 @@ Hybrid rule-based flagging + Gemini API for Marketing Mix Reallocation Strategie
 
 import json
 import re
+import asyncio
 import google.generativeai as genai
 import streamlit as st
 
-# ── System Persona Configuration ──────────────────────────────────────────────
+
+# ── System Persona ─────────────────────────────────────────────────────────────
 SYSTEM_PROMPT = """You are a Senior Fintech Growth Strategist at a top-tier B2B SaaS company
 specializing in cross-border payments and unit economics optimization (think Skydo, Wise, Airwallex).
 
@@ -41,8 +43,9 @@ Output format — always respond in valid JSON with this exact schema:
 Return ONLY the JSON object. No markdown, no backticks, no explanation."""
 
 
+# ── Rule-Based Flag Engine ─────────────────────────────────────────────────────
 def _build_flags(channel_summary: list) -> str:
-    """Evaluates channel safety constraints using deterministic rule thresholds."""
+    """Evaluates channel health using deterministic rule thresholds."""
     flags = []
     for ch in channel_summary:
         ratio        = ch.get("CAC_LTV_Ratio", 0)
@@ -60,8 +63,9 @@ def _build_flags(channel_summary: list) -> str:
     return "\n".join(flags) if flags else "No critical flags."
 
 
+# ── Prompt Builder ─────────────────────────────────────────────────────────────
 def build_prompt(channel_summary: list, cohort_summary: list, total_budget: float = 500_000) -> str:
-    """Assembles data tables and diagnostic flags into an execution prompt payload."""
+    """Assembles data tables and diagnostic flags into a structured prompt."""
     return f"""
 UNIT ECONOMICS DIAGNOSTIC REPORT — B2B SaaS Fintech Platform
 =============================================================
@@ -71,7 +75,7 @@ Analysis Period: Current cohort snapshot (10,000 customers)
 CHANNEL-LEVEL PERFORMANCE:
 {json.dumps(channel_summary, indent=2)}
 
-COHORT-LEVEL BREAKDOWN (Channel × Segment):
+COHORT-LEVEL BREAKDOWN (Channel x Segment):
 {json.dumps(cohort_summary, indent=2)}
 
 RULE-BASED FLAGS TRIGGERED:
@@ -89,42 +93,52 @@ Return ONLY valid JSON matching the schema. No extra text.
 """
 
 
+# ── Gemini Async Call ──────────────────────────────────────────────────────────
 async def get_ai_recommendations(
     channel_summary: list,
     cohort_summary: list,
     total_budget: float = 500_000,
 ) -> dict:
-    """Asynchronous pipeline powered by native Gemini SDK implementation."""
+    """Calls Gemini 1.5 Flash and returns parsed JSON recommendations."""
+
     api_key = st.secrets.get("GEMINI_API_KEY", "")
     if not api_key:
-        raise ValueError("GEMINI_API_KEY not found in Streamlit Secrets storage configuration.")
+        raise ValueError("GEMINI_API_KEY not found in .streamlit/secrets.toml")
 
-    # Explicitly configure wrapper credentials
+    # Configure Gemini SDK
     genai.configure(api_key=api_key)
-    
+
+    # Build prompt
     prompt = build_prompt(channel_summary, cohort_summary, total_budget)
 
-    # Initialize model using modern, high-speed standard with system context
+    # Initialize model with system instruction
     model = genai.GenerativeModel(
         model_name="gemini-2.5-flash",
-        system_instruction=SYSTEM_PROMPT
+        system_instruction=SYSTEM_PROMPT,
     )
 
-    # Execute async call enforcing runtime JSON delivery configurations
+    # Call Gemini async
     response = await model.generate_content_async(
         prompt,
         generation_config={
             "temperature": 0.2,
             "max_output_tokens": 1500,
-            "response_mime_type": "application/json"
-        }
+            "response_mime_type": "application/json",
+        },
     )
 
-    # Clean response safeguards against unexpected syntax wrappers
-    clean = re.sub(r"
-http://googleusercontent.com/immersive_entry_chip/0
+    # Extract and clean response text
+    raw = response.text
+    clean = re.sub(r"```(?:json)?|```", "", raw).strip()
 
-### What Changed & Why This Fixes It:
-1. **Removed Manual HTTP Endpoints:** Deleted the `httpx.AsyncClient` manual POST construction entirely. The pipeline now calls `model.generate_content_async()` via the official `google-generativeai` package, instantly bypassing the old `404 Not Found` API route error.
-2. **Upgraded to Current Engine Generation:** Changed the target container routing to `"gemini-2.5-flash"`. This model generation handles complex structural json requests natively.
-3. **Enforced Output Rules via `response_mime_type`:** Instructed the Gemini API at a core architectural layer to only pass text format as stringified JSON (`"response_mime_type": "application/json"`). This prevents formatting issues or markdown strings from breaking your JSON interpreter code.
+    return json.loads(clean)
+
+
+# ── Sync Wrapper for Streamlit ─────────────────────────────────────────────────
+def get_ai_recommendations_sync(
+    channel_summary: list,
+    cohort_summary: list,
+    total_budget: float = 500_000,
+) -> dict:
+    """Synchronous wrapper — Streamlit cannot call async functions directly."""
+    return asyncio.run(get_ai_recommendations(channel_summary, cohort_summary, total_budget))
