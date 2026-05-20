@@ -197,3 +197,36 @@ async def get_ai_recommendations(
         raise ValueError(f"Failed to parse model JSON output: {e}\nResponse snippet: {snippet}") from e
 
     return data
+
+
+def get_ai_recommendations_sync(channel_summary: list, cohort_summary: list, total_budget: float = 500_000) -> dict:
+    """Synchronous wrapper for `get_ai_recommendations` for environments
+    (like Streamlit) that expect blocking calls.
+    It will run the async function either via `asyncio.run` or inside a
+    background thread if an event loop is already running.
+    """
+    try:
+        return asyncio.run(get_ai_recommendations(channel_summary, cohort_summary, total_budget))
+    except RuntimeError:
+        # Event loop is already running (common in some app frameworks).
+        # Run the coroutine in a background thread.
+        result_container = {}
+
+        def _runner():
+            try:
+                res = asyncio.new_event_loop()
+                asyncio.set_event_loop(res)
+                result_container['res'] = res.run_until_complete(
+                    get_ai_recommendations(channel_summary, cohort_summary, total_budget)
+                )
+            finally:
+                try:
+                    asyncio.get_event_loop().close()
+                except Exception:
+                    pass
+
+        import threading
+        t = threading.Thread(target=_runner)
+        t.start()
+        t.join()
+        return result_container.get('res')
