@@ -39,7 +39,21 @@ Output format — always respond in valid JSON with this exact schema:
 }
  
 Return ONLY the JSON object. No markdown, no backticks, no explanation."""
- 
+import google.generativeai as genai
+import streamlit as st
+
+# This safely pulls the string from your hidden local secrets.toml
+genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+
+def run_ai_analysis(your_prompt):
+    try:
+        # Using a stable production model release
+        model = genai.GenerativeModel("gemini-1.5-flash-002")
+        response = model.generate_content(your_prompt)
+        return response.text
+    except Exception as e:
+        st.error(f"AI Analysis Error: {e}")
+        return None
  
 def _build_flags(channel_summary: list) -> str:
     flags = []
