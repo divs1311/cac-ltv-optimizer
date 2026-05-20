@@ -48,7 +48,8 @@ genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 def run_ai_analysis(your_prompt):
     try:
         # Using a stable production model release
-        model = genai.GenerativeModel("gemini-1.5-flash-002")
+        # Change "gemini-1.5-flash" to "gemini-2.5-flash" or "gemini-1.5-flash-002"
+        model = genai.GenerativeModel("gemini-2.5-flash")
         response = model.generate_content(your_prompt)
         return response.text
     except Exception as e:
